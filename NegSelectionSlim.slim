@@ -1,0 +1,101 @@
+// A script for a negative selection model with demography 
+
+initialize() {
+  setSeed(100);
+  defineConstant("s", 0);        // average selection coefficient
+  defineConstant("pi", 0.01);    // proportion of mutational targets  
+  defineConstant("varm", 1e-3);  // mutational variance
+  defineConstant("outfile", "test"); // output filename
+
+  defineConstant("L", 1e8);      // total chromosome length
+  defineConstant("mu", 1.65e-8); // mutation rate
+  defineConstant("varb", varm/(2*L*pi*mu));  // variance of QTL effects (scaled by the environmental variance)
+  defineConstant("sigma", sqrt(varb/(0.7*0.01 + 0.25*0.1 + 0.05)));  // sd of the largest mixture component of QTL effects 
+  defineConstant("k", -s/varb);   // weight of trait effect square for selection coefficient
+  
+  initializeTreeSeq();
+  initializeMutationRate(mu*pi);
+  initializeRecombinationRate(1e-8);
+  initializeMutationType("m2", 0.5, "f", 0.0);   // modified with mutation(m2) below
+  initializeGenomicElementType("g2", m2, 1);
+  initializeGenomicElement(g2, 0, L-1);    
+} 
+
+// Create the ancestral African population
+1 {
+  sim.addSubpop("p1", 7310);
+}
+
+// Expand the African population to 14474
+// This occurs 148000 years (5920) generations ago
+52080 { p1.setSubpopulationSize(14474); }
+
+// Split non-Africans from Africans into European population
+// This occurs 51000 years (2040 generations) ago
+55960 {
+        p1.setSubpopulationSize(1861);
+}
+
+// Split p2 into European and East Asian subpopulations
+// This occurs 23000 years (920 generations) ago
+57080 {
+        p1.setSubpopulationSize(1032);  // reduce European size
+}
+
+// Set up exponential growth in Europe and East Asia
+// Where N(0) is the base subpopulation size and t = gen - 57080:
+//    N(Europe) should be int(round(N(0) * e^(0.0038*t)))
+//    N(East Asia) should be int(round(N(0) * e^(0.0048*t)))
+57080:58000 {
+	t = sim.generation - 57080;
+        p1_size = round(1032 * exp(0.0038 * t));
+        p1.setSubpopulationSize(asInteger(p1_size));
+}
+
+mutation(m2) {
+   // QTL effect size follows a mixture distribution
+   u=runif(1);
+   if (u<0.7) {
+      mut.setSelectionCoeff(rnorm(1,0,sqrt(0.01)*sigma));
+      mut.tag = 0;
+   } else if (u<0.95) {
+      mut.setSelectionCoeff(rnorm(1,0,sqrt(0.1)*sigma));
+      mut.tag = 1;
+   } else {
+      mut.setSelectionCoeff(rnorm(1,0,sigma));
+      mut.tag=2;
+   }
+   return T;
+}
+
+fitness(m2) {
+	if (s) return 1.0 + k*(mut.selectionCoeff^2);
+        else return 1.0;
+}
+
+1: late() {
+	if (!(sim.generation % 10000)) {
+		// compute genetic variance from the additive effects of QTLs
+		inds = sim.subpopulations.individuals;
+        tags = inds.sumOfMutationsOfType(m2); // phenotypes
+		Vg = sd(tags)^2;
+	    inds.tagF = tags;	
+
+		// extract QTL info
+		qtls = sim.mutationsOfType(m2);
+		f = sim.mutationFrequencies(NULL, qtls); 
+		cat("Gen: " + sim.generation + " Vg: " + Vg + " per-QTL Vg: " + Vg/size(qtls) + " #QTL: " + size(qtls) + " #Common: " + size(f[f>0.01]) + "\n");
+	}
+}
+
+58000 late() {
+  sim.treeSeqOutput(paste(c(outfile,".trees"),""));
+  sim.outputMutations(sim.mutationsOfType(m2), paste(c(outfile,".QTLinfo"),""));
+  m2muts = sim.mutationsOfType(m2);
+  freqs = sim.mutationFrequencies(p1, m2muts);
+  lines = m2muts.tag + "    " + m2muts.position + "    " + m2muts.selectionCoeff + "    " + freqs + "\n";
+  file = paste(lines, "");
+  file = "tag position effect freq\n" + file;
+  if (!writeFile(paste(c(outfile,".mixture"),""), file)) stop("Error writing file.");
+  sim.simulationFinished();
+}
