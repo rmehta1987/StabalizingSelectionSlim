@@ -1,7 +1,0 @@
-/tmp/slurmd/job19003414/slurm_script: line 0: unalias: pine: not found
-/tmp/slurmd/job19003414/slurm_script: line 0: unalias: quota: not found
-/tmp/slurmd/job19003414/slurm_script: line 0: unalias: chsh: not found
-/tmp/slurmd/job19003414/slurm_script: line 0: unalias: grpe: not found
-/tmp/slurmd/job19003414/slurm_script: line 0: unalias: vi: not found
-/tmp/slurmd/job19003414/slurm_script: line 0: unalias: chfn: not found
-/tmp/slurmd/job19003414/slurm_script: line 21: SLiM: command not found
