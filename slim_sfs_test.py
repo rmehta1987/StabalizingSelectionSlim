@@ -12,7 +12,7 @@ def get_files(the_path: str):
     np_files = path.rglob("test.mixture") 
     np_dicts = [a.as_posix() for a in np_files] # Get file name and path
     data = []
-    save_df_path = path.split('/')[-1]
+    save_df_path = the_path.split('/')[-1]
     
     # load data of frequencies and selection coefficeints
     for a_file in tqdm(np_dicts):

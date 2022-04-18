@@ -38,7 +38,8 @@ def parse(out):
             return float(line.split()[1])
 
 def main():
-    main_dir = '/mnt/sda/home/ludeep/Desktop/PopGen/EvolutionaryGWAS/Slim_simulations/StabalizingSelectionSlim/'
+   # main_dir = '/mnt/sda/home/ludeep/Desktop/PopGen/EvolutionaryGWAS/Slim_simulations/StabalizingSelectionSlim/'
+    main_dir = '/project2/jjberg/mehta5/EvolutionaryGWAS/SlimScripts/stabalizing_slim_src/'
     count = 0
     for i in range(1, 500):
         slimrun = 'slim_run_number_{}'.format(i)
@@ -53,6 +54,7 @@ def main():
         out, err = process.communicate()
         #count += parse(out)
         #print(str(count/i))
+        print("Slim run: {}".format(i))
         os.chdir(main_dir)
 
 if __name__=="__main__":
