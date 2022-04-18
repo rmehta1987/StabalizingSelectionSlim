@@ -131,3 +131,6 @@ dmypy.json
 #Experiments
 Slim_Run*/
 *.npy
+*.put
+*.err
+Run_select*/
