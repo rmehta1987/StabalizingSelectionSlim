@@ -9,8 +9,9 @@ initialize() {
 	defineConstant("L", 5e8);      // total chromosome length
 	defineConstant("mu", 1e-7); // mutation rate
 	defineConstant("dominance_coef", 1.9e5); // dominance coefficient so that heterozygote is selected against
-	defineConstant("stable_selection", -1*((1/(4*N))*1e-2));  // selection coefficient for under-dominance
+	//defineConstant("stable_selection", -1*((1/(4*N))*1e-2));  // selection coefficient for under-dominance
 	defineConstant("recomb_rate", 1e-8);  // recombination rate
+	defineConstant("stable_selection", -1.5e-6);  // selection coefficient for under-dominance
 	
 	initializeMutationRate(mu);
 	initializeRecombinationRate(1e-7);
