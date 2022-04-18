@@ -52,8 +52,11 @@ def main():
         os.chdir(change_to)    
         process = subprocess.Popen(["slim", "../stabalizing_selection.slim"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,universal_newlines=True)
         out, err = process.communicate()
+<<<<<<< HEAD
         #count += parse(out)
         #print(str(count/i))
+=======
+>>>>>>> 39bc93e21e60389083c058533075eba36e80d6c9
         print("Slim run: {}".format(i))
         os.chdir(main_dir)
 
