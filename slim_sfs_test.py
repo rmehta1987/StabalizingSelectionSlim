@@ -4,11 +4,7 @@ import pandas as pd
 import glob
 import pathlib
 from tqdm import tqdm
-<<<<<<< HEAD
 import pickle
-=======
-
->>>>>>> 39bc93e21e60389083c058533075eba36e80d6c9
 
 def get_files(the_path: str):
     
@@ -16,10 +12,7 @@ def get_files(the_path: str):
     np_files = path.rglob("test.mixture") 
     np_dicts = [a.as_posix() for a in np_files] # Get file name and path
     data = []
-<<<<<<< HEAD
     save_df_path = the_path.split('/')[-1]
-=======
->>>>>>> 39bc93e21e60389083c058533075eba36e80d6c9
     
     # load data of frequencies and selection coefficeints
     for a_file in tqdm(np_dicts):
@@ -33,7 +26,6 @@ def get_files(the_path: str):
         data.append(df)
         del df
     
-<<<<<<< HEAD
     pickle.dump(data, open("{}".format(save_df_path),"wb"))
     print("Finished")
 
@@ -45,13 +37,6 @@ def main():
     
     for path in paths:
         get_files(path)
-=======
-    np.save('slim_run_df_1_5_e_6',data)
-    print("Finished")
-
-def main():
-    get_files('/mnt/sda/home/ludeep/Desktop/PopGen/EvolutionaryGWAS/Slim_simulations/StabalizingSelectionSlim/Run_sel_coef_1_5')
->>>>>>> 39bc93e21e60389083c058533075eba36e80d6c9
 
 
 if __name__=="__main__":
