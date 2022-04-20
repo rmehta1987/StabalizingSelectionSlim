@@ -26,7 +26,7 @@ def get_files(the_path: str):
         data.append(df)
         del df
     
-    pickle.dump(data, open("{}".format(save_df_path),"wb"))
+    pickle.dump(data, open("{}.pkl".format(save_df_path),"wb"))
     print("Finished")
 
 def main():

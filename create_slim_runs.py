@@ -38,11 +38,17 @@ def parse(out):
             return float(line.split()[1])
 
 def main():
-   # main_dir = '/mnt/sda/home/ludeep/Desktop/PopGen/EvolutionaryGWAS/Slim_simulations/StabalizingSelectionSlim/'
-    main_dir = '/project2/jjberg/mehta5/EvolutionaryGWAS/SlimScripts/stabalizing_slim_src/'
+    main_dir = '/mnt/sda/home/ludeep/Desktop/PopGen/EvolutionaryGWAS/Slim_simulations/StabalizingSelectionSlim/'
+    #main_dir = '/project2/jjberg/mehta5/EvolutionaryGWAS/SlimScripts/stabalizing_slim_src/'
     count = 0
+    exprun='Slim_Run_Experiment_2_e_6'
+    if not (os.path.isdir(exprun)):
+        try:
+            os.mkdir(exprun)
+        except OSError:
+            print("Error in making directory")
     for i in range(1, 500):
-        slimrun = 'slim_run_number_{}'.format(i)
+        slimrun = '{}/slim_run_number_{}'.format(exprun,i)
         if not (os.path.isdir(slimrun)):
             try:
                 os.mkdir(slimrun)
@@ -52,11 +58,8 @@ def main():
         os.chdir(change_to)    
         process = subprocess.Popen(["slim", "../stabalizing_selection.slim"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,universal_newlines=True)
         out, err = process.communicate()
-<<<<<<< HEAD
         #count += parse(out)
         #print(str(count/i))
-=======
->>>>>>> 39bc93e21e60389083c058533075eba36e80d6c9
         print("Slim run: {}".format(i))
         os.chdir(main_dir)
 
