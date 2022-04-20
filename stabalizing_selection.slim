@@ -2,8 +2,8 @@
 
 
 initialize() {
-	#setSeed(100);
-	defineConstant("N", 1000); // population size        
+	//setSeed(100);
+	defineConstant("N", 500); // population size        
 	defineConstant("outfile", "test"); // output filename
 	
 	defineConstant("L", 5e8);      // total chromosome length
@@ -11,7 +11,7 @@ initialize() {
 	defineConstant("dominance_coef", 1.9e5); // dominance coefficient so that heterozygote is selected against
 	// defineConstant("stable_selection", -1*((1/(4*N))*1e-2));  // selection coefficient for under-dominance
 	defineConstant("recomb_rate", 1e-8);  // recombination rate
-    defineConstant("stable_selection", -3.75e-6);
+    defineConstant("stable_selection", -1.75e-6);
 	
 	initializeMutationRate(mu);
 	initializeRecombinationRate(1e-7);
@@ -30,8 +30,8 @@ initialize() {
 1 {
 	sim.addSubpop("p1", N);
 }
-4000 { p1.setSubpopulationSize(1000); }
-5500 { p1.setSubpopulationSize(1000); }
+4000 { p1.setSubpopulationSize(500); }
+5500 { p1.setSubpopulationSize(500); }
 
 /* 1 late() {
 	

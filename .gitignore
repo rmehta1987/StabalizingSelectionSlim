@@ -134,3 +134,7 @@ Slim_Run*/
 *.put
 *.err
 Run_select*/
+*.h5
+
+#vscode
+.vscode/
