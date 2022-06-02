@@ -1,0 +1,1 @@
+/mnt/sda/home/ludeep/Desktop/PopGen/EvolutionaryGWAS/Slim_simulations/StabalizingSelectionSlim/Slim_Run_Experiment_1_75_e_6, -1.75e-06, 50, 1.9e5, 1e-7, 500

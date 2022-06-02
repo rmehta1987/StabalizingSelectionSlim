@@ -41,7 +41,7 @@ def main():
     main_dir = '/mnt/sda/home/ludeep/Desktop/PopGen/EvolutionaryGWAS/Slim_simulations/StabalizingSelectionSlim/'
     #main_dir = '/project2/jjberg/mehta5/EvolutionaryGWAS/SlimScripts/stabalizing_slim_src/'
     count = 0
-    exprun='Slim_Run_Experiment_1_5_e_6'
+    exprun='Slim_Run_Experiment_2_5_e_6'
     if not (os.path.isdir(exprun)):
         try:
             os.mkdir(exprun)
@@ -58,8 +58,11 @@ def main():
         os.chdir(change_to)    
         process = subprocess.Popen(["slim", "../../stabalizing_selection.slim"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,universal_newlines=True)
         out, err = process.communicate()
+
         #count += parse(out)
         #print(str(count/i))
+
+
         print("Slim run: {}".format(i))
         os.chdir(main_dir)
 
