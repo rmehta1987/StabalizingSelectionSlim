@@ -16,7 +16,7 @@ class GwasH5Dataset(Dataset):
         self.h5_paths = h5_paths
         self.indices = [None]*len(h5_paths)
         self.dataset_length = 0
-        if len(h5_paths) > 1:
+        if len(self.h5_paths) > 1:
             self._archives = [h5py.File(h5_path, "r") for h5_path in self.h5_paths]
             for a, archive in enumerate(self.archives):
                 the_keys = list(archive.keys())
@@ -31,13 +31,11 @@ class GwasH5Dataset(Dataset):
             self.indices[0] = (0, the_keys[0], the_keys[1])  # index of dataset, effect size key, frequency key
             self.dataset_length = self._archives[the_keys[0]].shape[0]
 
-        
-
         self._archives = None
 
     @property
     def archives(self):
-        if len(h5_paths) > 1:
+        if len(self.h5_paths) > 1:
             self._archives = [h5py.File(h5_path, "r") for h5_path in self.h5_paths]
         else:
             self._archives = h5py.File(self.h5_paths[0], "r")
@@ -70,10 +68,13 @@ class GwasH5Dataset(Dataset):
 
     def __len__(self):
         return self.dataset_length
-    
-h5_paths = ['Slim_Experiments_with_effects_h5/Slim_Run_Experiment_1_75_with_effect.h5']
+
+
+''' Test if it works'''    
+'''h5_paths = ['Slim_Experiments_with_effects_h5/Slim_Run_Experiment_1_75_with_effect.h5']
 datasets = GwasH5Dataset(h5_paths, False, False)
 loader = torch.utils.data.DataLoader(datasets, num_workers=2, batch_size = 4, shuffle=False )
 #tepm = datasets.__getitem__(torch.tensor((1,2,3)))
 batch = next(iter(loader))
 print("stuff")
+'''
