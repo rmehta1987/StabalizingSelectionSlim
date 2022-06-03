@@ -157,9 +157,10 @@ class integralDecoder(nn.Module):
         Returns:
             _type_: _description_
         """ 
-        numerator_1 = 1 - torch.exp(-2*N*s*(1-points))  # 1 - exp(2ns(1-x))
+        #numerator_1 = 1 - torch.exp(-2*N*s*(1-points))  # 1 - exp(2ns(1-x))
+        numerator_1 = 1 - torch.exp(-1*s*(1-points))  # 1 - exp(2ns(1-x))
         numerator_2 = (torch.pow(points,i-1))*torch.pow((1-points),(N-i-1))  # x^i(1-x)
-        denominator = torch.pow((1 - torch.exp(-2*N*s)),-1)
+        denominator = torch.pow((1 - torch.exp(-1*s)),-1)
         
         result = binomal_coef[i] * numerator_1 * numerator_2 * denominator
         if result.sum().isnan():
@@ -229,7 +230,7 @@ class gwasVAE(nn.Module):
             #q_z_mean = nn.Linear(self.dim_hidden, self.z_size)
             q_z_mean = nn.Sequential(
                 nn.Linear(self.dim_hidden, self.z_size),
-                nn.Softplus(),
+                ,
                 nn.Hardtanh(min_val=0.01, max_val=7.))
             q_z_var = nn.Sequential(
                 nn.Linear(self.dim_hidden, self.z_size),
