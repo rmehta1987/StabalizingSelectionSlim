@@ -23,7 +23,7 @@ FLAGS = flags.FLAGS
 #flags.DEFINE_string('pop_size', 500, 'Population Size')
 flags.DEFINE_integer('Latent_Dim', 10, 'Number latent dimensions for selection coefficient')
 flags.DEFINE_integer('Hidden_Dim', 64, 'Hidden Dims of layer')
-flags.DEFINE_integer('Epochs', 1, 'Number of Epochs')
+flags.DEFINE_integer('Epochs', 10, 'Number of Epochs')
 flags.DEFINE_bool('cuda', True, "Use CUDA")
 flags.DEFINE_string('path_to_binomial', "binomial_pop_size_500.npy", "Location of pre-created binomial coefficients")
 flags.DEFINE_string('dataset_path',"Slim_Experiments_with_effects_h5/Slim_Run_Experiment_1_75_with_effect.h5", "Path to dataset if it does not need to be created")
@@ -125,16 +125,16 @@ class integralDecoder(nn.Module):
         """        
         s = input
         if s.is_cuda:
-            points = torch.linspace(0.001, 1, int(2*N)).cuda()
+            points = torch.linspace(0.001, 1-.001, int(2*N)).cuda()
             probs = torch.zeros(int((2*N))).cuda()
         else:
-            points = torch.linspace(0.001, 1, int(2*N))
+            points = torch.linspace(0.001, 1-.001, int(2*N))
             probs = torch.zeros(int((2*N)))  
         
         scaled_pop_mut = 4*N*u
         #f_i = lambda i: binomial_coef[i] * ((1 - torch.exp(-2*N*s*(1-points))) * (torch.pow(points,i-1))*torch.pow((1-points),(N-i-1)) * torch.pow((1 - torch.exp(-2*N*s)),-1))
         #f_i = lambda i: (1 - torch.exp(-2*N*s*(1-points))) * (torch.pow(points,i-1))*torch.pow((1-points),(N-i-1)) * torch.pow((1 - torch.exp(-2*N*s)),-1)
-        for i in range(1,int(2*N)):
+        for i in range(1,int(2*N)-1):
             #f_i_result = f_i(i)
             f_i_result = self._calc_mean(points, binomial_coef, N, s, i)
             int_result = torch.trapz(y=f_i_result, x=points)
@@ -158,15 +158,29 @@ class integralDecoder(nn.Module):
             _type_: _description_
         """ 
         #numerator_1 = 1 - torch.exp(-2*N*s*(1-points))  # 1 - exp(2ns(1-x))
-        numerator_1 = 1 - torch.exp(-1*s*(1-points))  # 1 - exp(2ns(1-x))
-        numerator_2 = (torch.pow(points,i-1))*torch.pow((1-points),(N-i-1))  # x^i(1-x)
-        denominator = torch.pow((1 - torch.exp(-1*s)),-1)
         
-        result = binomal_coef[i] * numerator_1 * numerator_2 * denominator
-        if result.sum().isnan():
+        numerator_2 = (torch.pow(points,i-1))*torch.pow((1-points),(2*N-i-1))  # x^i(1-x)
+        #denominator = torch.abs(torch.pow((1 - torch.exp(-1*s)),-1))
+        #result_1 = numerator_1 * numerator_2 * denominator
+        
+        if s > 0:
+            numerator_1 = 1 - torch.exp(-1*s*(1-points))  # 1 - exp(2ns(1-x))
+            result_1 = numerator_1 * numerator_2 + 1e-10
+            result_2 = torch.log(binomal_coef[i]) + torch.log(result_1)
+            result_2 = torch.exp(result_1)
+        else:
+            numerator_1 = binomal_coef[i] - (torch.exp(torch.log(binomal_coef[i]) + -1*s*(1-points)))  # [(N c K) * 1 ] - [(N c k)*exp(-2*s*(1-x))]
+            result_2 = numerator_1 * numerator_2 + 1e-10
+        
+        result_3 = result_2
+        #result_3 = result_1
+        if result_3.sum().isnan():
             print("result is nan")
             print("i: {}, sel: {}".format(i,s.item()))
-        return result                                                       
+        if result_3.sum().isinf():
+            print("result is inf")
+            print("i: {}, sel: {}".format(i,s.item())) 
+        return result_3                                                       
 
 class gwasVAE(nn.Module):
     """
@@ -228,10 +242,8 @@ class gwasVAE(nn.Module):
             q_z_nn = nn.Sequential(nn.Linear(self.input_size, self.dim_hidden),nn.Linear(self.dim_hidden, self.dim_hidden),
                                    nn.Linear(self.dim_hidden, self.dim_hidden))  # 3 Layers 
             #q_z_mean = nn.Linear(self.dim_hidden, self.z_size)
-            q_z_mean = nn.Sequential(
-                nn.Linear(self.dim_hidden, self.z_size),
-                ,
-                nn.Hardtanh(min_val=0.01, max_val=7.))
+            q_z_mean = nn.Linear(self.dim_hidden, self.z_size)
+                
             q_z_var = nn.Sequential(
                 nn.Linear(self.dim_hidden, self.z_size),
                 nn.Softplus(),
@@ -271,8 +283,8 @@ class gwasVAE(nn.Module):
         """
 
         h = self.q_z_nn(x)
-        h = h.view(h.size(0), -1)
-        mean = self.q_z_mean(h)
+        #h = h.view(h.size(0), -1)
+        mean = torch.clamp(self.q_z_mean(h), min=-200)
         var = self.q_z_var(h)
 
         return mean, var
@@ -393,7 +405,7 @@ def main(argv):
         num_data = 0
         h5_paths = [FLAGS.dataset_path] # need to change so input can be list of h5
         datasets = GwasH5Dataset(h5_paths)
-        data_loader = torch.utils.data.DataLoader(datasets, num_workers=2, batch_size = 1, shuffle=False)
+        data_loader = torch.utils.data.DataLoader(datasets, num_workers=2, batch_size = 2, shuffle=False)
         device = torch.device("cuda" if FLAGS.cuda else "cpu")
         train_loss = np.zeros(len(data_loader))
         train_z= np.zeros(len(data_loader))
@@ -424,7 +436,7 @@ def main(argv):
                     train_loss[step] = loss.item()
                     train_z[step] = torch.mean(zk).detach().cpu().numpy()
                     optimizer.step()
-                    num_data += 4 # hard-coded temporarily
+                    num_data += 2 # hard-coded temporarily
                 else:
                     optimizer.zero_grad()
                     x_mean, z_mu, z_var, ldj, z0, zk = model(data)
@@ -434,7 +446,7 @@ def main(argv):
                     optimizer.step()
                     train_loss[step] = loss.item()
                     train_z[step] = torch.mean(zk).detach().cpu().numpy()
-                    num_data += 4 # hard-coded temporarily
+                    num_data += 2 # hard-coded temporarily
                 
                 if step % 10 == 0:
                 
@@ -442,13 +454,17 @@ def main(argv):
                         i, num_data, len(data_loader.sampler), 100. * step / len(data_loader),
                         loss.item(), rec, kl))
                     #break
+            plt.axhline(y=np.log(np.abs(true_sel_coef.numpy())), color='r', linestyle='-')
+            plt.plot(np.log(np.abs(train_z)))
+            plt.savefig('Slim_experiment_2_1_75_epoch_{}'.format(i))
+
                     
     else:
         print("Need a path to a dataset or to create one.")
     
     plt.axhline(y=np.log(np.abs(true_sel_coef.numpy())), color='r', linestyle='-')
     plt.plot(np.log(np.abs(train_z)))
-    plt.show()
+    plt.savefig('Slim_2_all_experiment_2_1_75_epoch_{}'.format(i))
 
     
                 
