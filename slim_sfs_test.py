@@ -138,10 +138,20 @@ class integralDecoder(nn.Module):
             #f_i_result = f_i(i)
             f_i_result = self._calc_mean(points, binomial_coef, N, s, i)
             int_result = torch.trapz(y=f_i_result, x=points)
-            if int_result.isnan():
+            bi_coef_result = binomial_coef[i]*int_result
+            if bi_coef_result.isnan():
+                print("i: {}, sel: {}".format(i,s.item()))
+            if bi_coef_result.sum().isinf():
                 print("i: {}, sel: {}".format(i,s.item()))
                 
-            probs[i] = scaled_pop_mut*int_result
+            result = scaled_pop_mut*bi_coef_result
+            if result.isnan():
+                print("i: {}, sel: {}".format(i,s.item()))
+            if result.isinf():
+                print("i: {}, sel: {}".format(i,s.item()))
+            if result < 0:
+                print("i: {}, sel: {}".format(i,s.item()))
+            probs[i] = torch.log(result)
         return probs
     
     def _calc_mean(self, points, binomal_coef, N, s, i):
@@ -160,26 +170,24 @@ class integralDecoder(nn.Module):
         #numerator_1 = 1 - torch.exp(-2*N*s*(1-points))  # 1 - exp(2ns(1-x))
         
         numerator_2 = (torch.pow(points,i-1))*torch.pow((1-points),(2*N-i-1))  # x^i(1-x)
-        #denominator = torch.abs(torch.pow((1 - torch.exp(-1*s)),-1))
+        denominator = torch.pow((1 - torch.exp(-1*s)),-1)
         #result_1 = numerator_1 * numerator_2 * denominator
         
-        if s > 0:
-            numerator_1 = 1 - torch.exp(-1*s*(1-points))  # 1 - exp(2ns(1-x))
-            result_1 = numerator_1 * numerator_2 + 1e-10
-            result_2 = torch.log(binomal_coef[i]) + torch.log(result_1)
-            result_2 = torch.exp(result_1)
-        else:
-            numerator_1 = binomal_coef[i] - (torch.exp(torch.log(binomal_coef[i]) + -1*s*(1-points)))  # [(N c K) * 1 ] - [(N c k)*exp(-2*s*(1-x))]
-            result_2 = numerator_1 * numerator_2 + 1e-10
         
-        result_3 = result_2
-        #result_3 = result_1
+        numerator_1 = 1 - torch.exp(-1*s*(1-points))  # 1 - exp(2ns(1-x))
+        if denominator == 0:
+            result_1 = numerator_2
+        else:
+            result_1 = numerator_1 * numerator_2 * denominator + 1e-10
+
+        result_3 = result_1
         if result_3.sum().isnan():
             print("result is nan")
             print("i: {}, sel: {}".format(i,s.item()))
         if result_3.sum().isinf():
             print("result is inf")
-            print("i: {}, sel: {}".format(i,s.item())) 
+            print("i: {}, sel: {}".format(i,s.item()))
+        
         return result_3                                                       
 
 class gwasVAE(nn.Module):
@@ -307,8 +315,12 @@ class gwasVAE(nn.Module):
         z_mu, z_var = self.encode(x)
         # sample z
         z = self.reparameterize(z_mu, z_var)
-        x_mean = self.decode(z)
-
+        x_mean = torch.clamp(self.decode(z), max=5)
+        if x_mean.sum().isinf():
+            print("x_mean is inf")
+        if x_mean.sum().isnan():
+            print("x_mean is inf")
+        
         return x_mean, z_mu, z_var, self.log_det_j, z, z
     
     def calculate_loss(self, recon_x, x, z_mu, z_var, z_0, z_k, ldj):
@@ -409,6 +421,7 @@ def main(argv):
         device = torch.device("cuda" if FLAGS.cuda else "cpu")
         train_loss = np.zeros(len(data_loader))
         train_z= np.zeros(len(data_loader))
+        x_clamp=10
         print("Start Training")
         for i in range(FLAGS.Epochs):
             for step, the_data in enumerate(data_loader):
@@ -439,6 +452,12 @@ def main(argv):
                     num_data += 2 # hard-coded temporarily
                 else:
                     optimizer.zero_grad()
+                    if FLAGS.cuda:
+                        #data = torch.mul(the_data['Freq'][:,:,1].cuda(), (1/2*the_data['Labels']['pop_size'][0]))
+                        data = the_data['Freq'][:,:,1].cuda()
+                    else:
+                        #data = torch.mul(the_data['Freq'][:,:,1], (1/2*the_data['Labels']['pop_size'][0]))
+                        data = the_data['Freq'][:,:,1]
                     x_mean, z_mu, z_var, ldj, z0, zk = model(data)
                     #loss, rec, kl, bpd = model.calculate_loss(x_mean, data, z_mu, z_var, z0, zk, ldj)
                     loss, rec, kl = model.calculate_loss(x_mean, data, z_mu, z_var, z0, zk, ldj)
@@ -456,6 +475,9 @@ def main(argv):
                     #break
             plt.axhline(y=np.log(np.abs(true_sel_coef.numpy())), color='r', linestyle='-')
             plt.plot(np.log(np.abs(train_z)))
+            plt.ylabel('Selection Coefficient')
+            plt.xlabel('Training Step')
+            plt.title('Inferred Selection from Simulated GWAS with x clamped at {}'.format(x_clamp))
             plt.savefig('Slim_experiment_2_1_75_epoch_{}'.format(i))
 
                     
@@ -463,8 +485,11 @@ def main(argv):
         print("Need a path to a dataset or to create one.")
     
     plt.axhline(y=np.log(np.abs(true_sel_coef.numpy())), color='r', linestyle='-')
+    plt.ylabel('Selection Coefficient')
+    plt.xlabel('Training Step')
+    plt.title('Inferred Selection from Simulated GWAS with x clamped at {}'.format(x_clamp))
     plt.plot(np.log(np.abs(train_z)))
-    plt.savefig('Slim_2_all_experiment_2_1_75_epoch_{}'.format(i))
+    plt.savefig('Slim_2_all_experiment_2_1_75_epoch'.format(i))
 
     
                 
