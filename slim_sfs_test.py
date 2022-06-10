@@ -13,6 +13,9 @@ import pytorch_lightning as pl
 from hdf5_dataset import GwasH5Dataset
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import torch.multiprocessing as mp
+import time
+
 
 from absl import app, flags
 
@@ -25,6 +28,7 @@ flags.DEFINE_integer('Latent_Dim', 10, 'Number latent dimensions for selection c
 flags.DEFINE_integer('Hidden_Dim', 64, 'Hidden Dims of layer')
 flags.DEFINE_integer('Epochs', 10, 'Number of Epochs')
 flags.DEFINE_bool('cuda', True, "Use CUDA")
+flags.DEFINE_integer('Batch_Size', 2, 'Batch Size')
 flags.DEFINE_string('path_to_binomial', "binomial_pop_size_500.npy", "Location of pre-created binomial coefficients")
 flags.DEFINE_string('dataset_path',"Slim_Experiments_with_effects_h5/Slim_Run_Experiment_1_75_with_effect.h5", "Path to dataset if it does not need to be created")
 flags.DEFINE_string('create_dataset_path', "", "A file that contains the path to files that are converted to a dataset")
@@ -111,98 +115,117 @@ class SetTransformer(nn.Module):
 
 class integralDecoder(nn.Module):
     def __init__(self, cuda=True, N=500, u=1e-7):
-        super(integralDecoder, self).__init__()
-        
-        self.scaled_pop_mut = 4*N*u
-        if cuda:
-            self.points = torch.linspace(0.001, 1-.001, int(2*N)).cuda()
-            self.probs = torch.zeros(int((2*N))).cuda()
-        else:
-            self.points = torch.linspace(0.001, 1-.001, int(2*N))
-            self.probs = torch.zeros(int((2*N)))
-        
-        self.binomial_coef = torch.distributions.binomial.Binomial(total_count=N, probs=self.points) 
-            
-    def forward(self, input, N, u, binomial_coef):
-        """ Forward module for neural network to integrate the selection coefficient inferred and re-generate the site-frequency spectrum
-
-        Args:
-            input (_type_): the input latent dimensions from the last layer
-            N (int): population size
-            u (float): mutation rate
-
-        Returns:
-            _type_: _description_
-        """        
-        s = input
-         
-        
-        
-        #f_i = lambda i: binomial_coef[i] * ((1 - torch.exp(-2*N*s*(1-points))) * (torch.pow(points,i-1))*torch.pow((1-points),(N-i-1)) * torch.pow((1 - torch.exp(-2*N*s)),-1))
-        #f_i = lambda i: (1 - torch.exp(-2*N*s*(1-points))) * (torch.pow(points,i-1))*torch.pow((1-points),(N-i-1)) * torch.pow((1 - torch.exp(-2*N*s)),-1)
-        for i in range(1,int(2*N)-1):
-            #f_i_result = f_i(i)
-            f_i_result = self._calc_mean(points, binomial_coef, N, s, i)
-            int_result = torch.trapz(y=f_i_result, x=points)
-            bi_coef_result = binomial_coef[i]*int_result
-            if bi_coef_result.isnan():
-                print("i: {}, sel: {}".format(i,s.item()))
-            if bi_coef_result.sum().isinf():
-                print("i: {}, sel: {}".format(i,s.item()))
-                
-            result = scaled_pop_mut*bi_coef_result
-            if result.isnan():
-                print("i: {}, sel: {}".format(i,s.item()))
-            if result.isinf():
-                print("i: {}, sel: {}".format(i,s.item()))
-            if result < 0:
-                print("i: {}, sel: {}".format(i,s.item()))
-            probs[i] = torch.log(result)
-        return probs
-    
-    def _calc_mean(self, points, binomal_coef, N, s, i):
         """_summary_
 
         Args:
-            points (_type_): _description_
-            binomal_coef (_type_): _description_
-            N (_type_): _description_
-            s (_type_): _description_
-            i: 
+            cuda (bool, optional): _description_. Defaults to True.
+            N (int, optional): _description_. Defaults to 500.
+            u (_type_, optional): _description_. Defaults to 1e-7.
+        """        
+        super(integralDecoder, self).__init__()
+        
+        self.N = N # population size
+        self.scaled_pop_mut = 4*N*u # scaled population mutation rate
+        self.cuda = cuda
+        if cuda:
+            self.points = torch.linspace(0.001, 1-.001, int(2*N)).cuda()
+            self.probs = torch.zeros(int((2*N))).cuda()
+            #self.binomial_log_prob = torch.empty(size=(int(2*self.N-1),self.points.shape[0])).cuda()
+            self.binomial_log_prob = torch.zeros(size=(int(2*self.N),self.points.shape[0])).cuda()
+            self.eps = torch.tensor(1e-6).cuda()
+            
+        else:
+            self.points = torch.linspace(0.001, 1-.001, int(2*N))
+            self.probs = torch.zeros(int((2*N)))
+            #self.binomial_log_prob = torch.empty(size=(int(2*self.N-1),self.points.shape[0]))
+            self.binomial_log_prob = torch.zeros(size=(int(2*self.N),self.points.shape[0]))
+            self.eps = torch.tensor(1e-6)
+        
+        self.binomial_coef = torch.distributions.binomial.Binomial(total_count=2*N, probs=self.points)
+        
+        self._create_prob()                     
+      
+    def _multiprocess_prob(self, count):
+        self.binomial_log_prob[count] = torch.exp(self.binomial_coef.log_prob(torch.tensor(count-1)))
+    
+    
+    def _create_prob(self):
+    
+        """Create and return probabilities of the N choose i f(x) part of the poisson random field
+        """
+        '''starttime = time.time()
+        processes = []
+        for i in range(1,int(2*self.N)-1):
+            p = mp.Process(target=self._multiprocess_prob, args={i})
+            processes.append(p)
+            p.start()
+        
+        for process in processes:
+            process.join()
+        
+        print('That took {} seconds'.format(time.time() - starttime))'''
+        for i in range(1,int(2*self.N)):
+            if self.cuda:
+                self.binomial_log_prob[i] = torch.exp(self.binomial_coef.log_prob(torch.tensor(i-1))).cuda() # (N choose i-1) * ([x^(i-1)]*(1-x)^(N-i-1)
+        
+        
+            
+                
+    def forward(self, s):
+        """ Forward module for neural network to integrate the selection coefficient inferred and re-generate the site-frequency spectrum
 
+        Args:
+            s (_type_): the inferred selection coefficient
         Returns:
             _type_: _description_
-        """ 
-        #numerator_1 = 1 - torch.exp(-2*N*s*(1-points))  # 1 - exp(2ns(1-x))
+        """        
+        scaled_selection = torch.tensor(2*self.N * s.item())
+        prf_denominator = torch.exp(-1*scaled_selection)
         
-        numerator_2 = (torch.pow(points,i-1))*torch.pow((1-points),(2*N-i-1))  # x^i(1-x)
-        denominator = torch.pow((1 - torch.exp(-1*s)),-1)
-        #result_1 = numerator_1 * numerator_2 * denominator
+        if scaled_selection < 0:
+            if torch.isinf(prf_denominator): 
+                # (1 - e^s) when e^s is infinity so (1 - e^s*(1-x)) is 1 - inf then (1 - inf)/(1-inf) = 1
+                final_prf = 1+torch.clamp(s, min=self.eps)
+            else:
+                prf_numerator = 1 - torch.exp(-1*2*self.N * s*(1-self.points))
+                final_prf = prf_numerator*torch.pow(1-torch.exp(-1*2*self.N*s),-1)
+        elif scaled_selection > 0:
+            if prf_denominator == 0:
+                # use approximation e^-s = (1-s) 
+                # denominator is then just scaled_selection coefficient as 1 - e^-s = 1 - (1 - s) = s
+                # numerator is just 1 - (1 - s*x) = s*x
+                # numerator/denominator = sx/s = x
+                final_prf = torch.clamp(s,min=self.eps)*self.points *torch.pow(torch.clamp(s,min=self.eps),-1)
+            else:
+                prf_numerator = 1 - torch.exp(-1*2*self.N * s*(1-self.points))
+                final_prf = prf_numerator*torch.pow(1-torch.exp(-1*2*self.N*s),-1)
         
-        
-        numerator_1 = 1 - torch.exp(-1*s*(1-points))  # 1 - exp(2ns(1-x))
-        if denominator == 0:
-            result_1 = numerator_2
+        if self.cuda:
+            probs =  torch.zeros(int((2*self.N))).cuda()
         else:
-            result_1 = numerator_1 * numerator_2 * denominator + 1e-10
-
-        result_3 = result_1
-        if result_3.sum().isnan():
-            print("result is nan")
-            print("i: {}, sel: {}".format(i,s.item()))
-        if result_3.sum().isinf():
-            print("result is inf")
-            print("i: {}, sel: {}".format(i,s.item()))
+            probs = torch.zeros(int((2*self.N)))
         
-        return result_3                                                       
-
+        for i in range(1,int(2*self.N)):
+            f_i_result = self.binomial_log_prob[i] * final_prf
+            int_result = self.scaled_pop_mut*torch.trapz(y=f_i_result, x=self.points)
+            
+            if int_result.isnan():
+                print("i: {}, sel: {}".format(i,s.item()))
+            if int_result.isinf():
+                print("i: {}, sel: {}".format(i,s.item()))
+            if int_result < 0:
+                print("i: {}, sel: {}".format(i,s.item()))
+            
+            probs[i] = torch.log(int_result)
+        return probs
+    
 class sfsVAE(nn.Module):
     """
     The base VAE class containing linear encoder and decoder architecture for gwas Site Frequency Spectrums.
     Can be used as a base class for VAE's with normalizing flows.
     """
 
-    def __init__(self, latent_dims, pop_size, mut_rate, dim_hidden, use_set, use_cuda, coef):
+    def __init__(self, latent_dims, pop_size, mut_rate, dim_hidden, use_set, use_cuda):
         """
         Arguments:
             dim_in: an integer, input dimension.
@@ -218,7 +241,7 @@ class sfsVAE(nn.Module):
         self.dim_hidden = dim_hidden
         self.set = use_set # If using permutation invariant layers (SET) 
         #self.q_z_nn_output_dim = 256
-        
+        self.cuda = use_cuda
         self.pop_size = pop_size
         self.mut_rate = mut_rate
         self.q_z_nn, self.q_z_mean, self.q_z_var = self.create_encoder()
@@ -231,11 +254,11 @@ class sfsVAE(nn.Module):
         # auxiliary
         if use_cuda:
             self.FloatTensor = torch.cuda.FloatTensor
-            self.binomial_coef = torch.from_numpy(coef).cuda()
+            #self.binomial_coef = torch.from_numpy(coef).cuda()
         else:
             self.FloatTensor = torch.FloatTensor
-            self.binomial_coef = torch.from_numpy(coef)
-
+            #self.binomial_coef = torch.from_numpy(coef)
+        
         # log-det-jacobian = 0 without flows
         self.log_det_j = self.FloatTensor(1).zero_()
 
@@ -276,7 +299,7 @@ class sfsVAE(nn.Module):
                     nn.Linear(self.dim_hidden, self.input_size))
             return p_x_nn
         else:
-            return integralDecoder()
+            return integralDecoder(self.cuda, self.pop_size, self.mut_rate)
             # map the selection coefficients to the poisson random field F(i)
    
     def reparameterize(self, mu, var):
@@ -307,7 +330,7 @@ class sfsVAE(nn.Module):
         """
 
         """
-        x_mean = self.p_x_nn(torch.mean(z), self.pop_size, self.mut_rate, self.binomial_coef)
+        x_mean = self.p_x_nn(torch.mean(z))
         
         return x_mean
 
@@ -321,7 +344,7 @@ class sfsVAE(nn.Module):
         z_mu, z_var = self.encode(x)
         # sample z
         z = self.reparameterize(z_mu, z_var)
-        x_mean = torch.clamp(self.decode(z), max=30)
+        x_mean = torch.clamp(self.decode(z), max=10)
         if x_mean.sum().isinf():
             print("x_mean is inf")
         if x_mean.sum().isnan():
@@ -346,7 +369,7 @@ class sfsVAE(nn.Module):
         beta=1.
 
         #reconstruction_function = nn.BCELoss(reduction='sum')
-        reconstruction_function = nn.PoissonNLLLoss(full=True, reduction='mean')
+        reconstruction_function = nn.PoissonNLLLoss(log_input=True, full=True, reduction='mean')
 
         batch_size = x.size(0)
 
@@ -394,242 +417,6 @@ class sfsVAE(nn.Module):
         else:
             return log_norm
         
-   
-class effectSizeVAE(nn.Module):
-    """
-    The base VAE class containing linear encoder and decoder architecture for gwas Effect Sizes.
-    Can be used as a base class for VAE's with normalizing flows.
-    """
-
-    def __init__(self, latent_dims, pop_size, mut_rate, dim_hidden, use_set, use_cuda, coef):
-        """_summary_
-
-        Arguments:
-            dim_in: an integer, input dimension.
-            num_inds: an integer, number of inducing points.
-            num_heads: an integer, number of heads.
-            ln: boolean to normalize layers
-            latent_dims (_type_): _description_
-            pop_size (_type_): _description_
-            mut_rate (_type_): _description_
-            dim_hidden (_type_): _description_
-            use_set (_type_): _description_
-            use_cuda (_type_): _description_
-            coef (_type_): _description_
-            
-        """
-        super(effectSizeVAE, self).__init__()
-        self.z_size = latent_dims # Latent dimensions
-        self.input_size = int(pop_size*2) # Population size
-        #self.num_heads = args.num_heads # Multi-attention head
-        #self.num_inds = args.num_inds
-        self.dim_hidden = dim_hidden
-        self.set = use_set # If using permutation invariant layers (SET) 
-        #self.q_z_nn_output_dim = 256
-        
-        self.pop_size = pop_size
-        self.mut_rate = mut_rate
-        self.q_z_nn, self.q_z_mean, self.q_z_var, self.q_s_nn, self.q_s_mean, self.q_s_var, self.q_omega_nn, q_omega_mean, self.q_omega_var = self.create_encoder()
-        self.p_x_nn = self.create_decoder()
-        
-        #self.ln = args.ln
-        #self.num_outputs = args.num_outputs # number of samples
-        
-
-        # auxiliary
-        if use_cuda:
-            self.FloatTensor = torch.cuda.FloatTensor
-            self.binomial_coef = torch.from_numpy(coef).cuda()
-        else:
-            self.FloatTensor = torch.FloatTensor
-            self.binomial_coef = torch.from_numpy(coef)
-
-        # log-det-jacobian = 0 without flows
-        self.log_det_j = self.FloatTensor(1).zero_()
-
-    def create_encoder(self):
-        """
-        Helper function to create the elemental blocks for the encoder. Creates a set based encoder
-        as the counts of sites and independant with each other.  
-        """
-        if self.set:
-            q_z_nn = nn.Sequential(ISAB(self.input_size, self.dim_hidden, self.num_heads, self.num_inds, self.ln), 
-                                            ISAB(self.dim_hidden, self.dim_hidden, self.num_heads, self.num_inds, self.ln))
-            q_z_mean = nn.Linear(256, self.z_size)
-            q_z_var = nn.Sequential(
-                nn.Linear(256, self.z_size),
-                nn.Softplus(),
-                nn.Hardtanh(min_val=0.01, max_val=7.))
-        else:
-            q_z_nn = nn.Sequential(nn.Linear(self.input_size, self.dim_hidden),nn.Linear(self.dim_hidden, self.dim_hidden),
-                                   nn.Linear(self.dim_hidden, self.dim_hidden))  # 3 Layers 
-            
-            q_z_mean = nn.Linear(self.dim_hidden, self.z_size)
-                
-            q_z_var = nn.Sequential(
-                nn.Linear(self.dim_hidden, self.z_size),
-                nn.Softplus(),
-                nn.Hardtanh(min_val=0.01, max_val=7.))
-            
-            q_s_nn = nn.Sequential(nn.Linear(self.z_size, self.s_dim_hidden),nn.Linear(self.s_dim_hidden, self.s_dim_hidden),
-                                   nn.Linear(self.s_dim_hidden, self.s_dim_hidden))
-            q_s_mean = nn.Linear(self.s_dim_hidden, self.s_dim_hidden)
-            q_s_var = nn.Sequential(
-                nn.Linear(self.s_dim_hidden, self.s_dim_hidden),
-                nn.Softplus())
-            
-            q_omega_nn = nn.Sequential(nn.Linear(self.z_size, self.s_dim_hidden),nn.Linear(self.s_dim_hidden, self.s_dim_hidden),
-                                   nn.Linear(self.s_dim_hidden, self.s_dim_hidden))
-            q_omega_mean = nn.Linear(self.s_dim_hidden, 1)
-            q_omega_var = nn.Sequential(
-                nn.Linear(self.s_dim_hidden, 1),
-                nn.Softplus())
-             
-        return q_z_nn, q_z_mean, q_z_var, q_s_nn, q_s_mean, q_s_var, q_omega_nn, q_omega_mean, q_omega_var
-
-    def create_decoder(self):
-        """
-        Helper function to create the elemental blocks for the decoder. Creates a gated convnet decoder.
-        """
-        if self.set:
-            p_x_nn= nn.Sequential(
-                    PMA(self.dim_hidden, self.num_heads, self.num_outputs, ln=self.ln),
-                    SAB(self.dim_hidden, self.dim_hidden, self.num_heads, ln=self.ln),
-                    SAB(self.dim_hidden, self.dim_hidden, self.num_heads, ln=self.ln),
-                    nn.Linear(self.dim_hidden, self.input_size))
-            return p_x_nn
-        else:
-            p_beta = nn.Sequential(nn.Linear(self.s_dim_hidden+1, self.z_size),nn.Linear(self.z_size, self.dim_hidden),
-                                   nn.Linear(self.s_dim_hidden, self.s_dim_hidden), nn.Linear(self.dim_hidden, self.input_size))
-            
-            return p_beta
-
-   
-    def reparameterize(self, mu, var):
-        """
-        Samples z from a multivariate Gaussian with diagonal covariance matrix using the
-            reparameterization trick.
-        """
-
-        std = var.sqrt()
-        eps = self.FloatTensor(std.size()).normal_()
-        z = eps.mul(std).add_(mu)
-
-        return z
-
-    def encode(self, x):
-        """
-        Encoder expects following data shapes as input: shape = (batch_size, num_channels, width, height)
-        """
-
-        h = self.q_z_nn(x)
-        mean = self.q_z_mean(h)
-        var = self.q_z_var(h)
-        
-        return mean, var
-
-    def decode(self, s, omega):
-        """
-
-        """
-        x_mean = self.p_x_nn(torch.cat(s, omega))
-        
-        return x_mean
-
-    def forward(self, x):
-        """
-        Evaluates the model as a whole, encodes and decodes. Note that the log det jacobian is zero
-         for a plain VAE (without flows), and z_0 = z_k.
-        """
-
-        # mean and variance of z
-        z_mu, z_var = self.encode(x)
-        # sample z
-        z = self.reparameterize(z_mu, z_var)
-        
-        s_mu = self.q_s_mean(self.q_s_nn(z))
-        s_var = self.q_s_var(self.q_s_nn(z))
-        s_repram = self.reparameterize(s_mu, s_var)
-        
-        omega_mu = self.q_s_mean(self.q_s_nn(z))
-        omega_var = self.q_s_var(self.q_s_nn(z))
-        omega_repram = self.reparameterize(omega_mu, omega_var)
-        
-        x_mean = self.decode(s_repram, omega_repram)
-        if x_mean.sum().isinf():
-            print("x_mean is inf")
-        if x_mean.sum().isnan():
-            print("x_mean is inf")
-        
-        return x_mean, z_mu, z_var, self.log_det_j, z, z
-    
-    def calculate_loss(self, recon_x, x, z_mu, z_var, z_0, z_k, ldj):
-        """
-        Computes the binary loss function while summing over batch dimension, not averaged!
-        :param recon_x: shape: (batch_size, num_channels, pixel_width, pixel_height), bernoulli parameters p(x=1)
-        :param x: shape (batchsize, num_channels, pixel_width, pixel_height), pixel values rescaled between [0, 1].
-        :param z_mu: mean of z_0
-        :param z_var: variance of z_0
-        :param z_0: first stochastic latent variable
-        :param z_k: last stochastic latent variable
-        :param ldj: log det jacobian
-        :param beta: beta for kl loss
-        :return: loss, ce, kl
-        """
-        
-        beta=1.
-
-        #reconstruction_function = nn.BCELoss(reduction='sum')
-        reconstruction_function = nn.PoissonNLLLoss(full=True, reduction='mean')
-
-        batch_size = x.size(0)
-
-        # - N E_q0 [ ln p(x|z_k) ]
-        bce = reconstruction_function(recon_x, x)
-
-        # ln p(z_k)  (not averaged)
-        log_p_zk = self.log_normal_standard(z_k, dim=1)
-        # ln q(z_0)  (not averaged)
-        log_q_z0 = self.log_normal_diag(z_0, mean=z_mu, log_var=z_var.log(), dim=1)
-        # N E_q0[ ln q(z_0) - ln p(z_k) ]
-        summed_logs = torch.sum(log_q_z0 - log_p_zk)
-
-        # sum over batches
-        summed_ldj = torch.sum(ldj)
-
-        # ldj = N E_q_z0[\sum_k log |det dz_k/dz_k-1| ]
-        kl = (summed_logs - summed_ldj)
-        loss = bce + beta * kl
-
-        loss = loss / float(batch_size)
-        bce = bce / float(batch_size)
-        kl = kl / float(batch_size)
-
-        return loss, bce, kl
-    
-    def log_normal_standard(self, x, average=False, reduce=True, dim=None):
-        log_norm = -0.5 * x * x
-
-        if reduce:
-            if average:
-                return torch.mean(log_norm, dim)
-            else:
-                return torch.sum(log_norm, dim)
-        else:
-            return log_norm
-    
-    def log_normal_diag(self, x, mean, log_var, average=False, reduce=True, dim=None):
-        log_norm = -0.5 * (log_var + (x - mean) * (x - mean) * log_var.exp().reciprocal())
-        if reduce:
-            if average:
-                return torch.mean(log_norm, dim)
-            else:
-                return torch.sum(log_norm, dim)
-        else:
-            return log_norm
-
-
-
 def main(argv):
 
     if FLAGS.create_dataset_path:
@@ -640,46 +427,43 @@ def main(argv):
                 create_data_set(a_path, sel_coef=float(sel_coef), create_effect=True, omega=float(omega), dom_coef=float(dom_coef), mut_rate=float(mut_rate), pop_size=float(pop_size))
                 print("Finished processing data in {}".format(a_path))
     elif FLAGS.dataset_path:
-        num_data = 0
+        
         h5_paths = [FLAGS.dataset_path] # need to change so input can be list of h5
         datasets = GwasH5Dataset(h5_paths)
-        data_loader = torch.utils.data.DataLoader(datasets, num_workers=2, batch_size = 2, shuffle=False)
+        data_loader = torch.utils.data.DataLoader(datasets, num_workers=2, batch_size = FLAGS.Batch_Size, shuffle=False)
         device = torch.device("cuda" if FLAGS.cuda else "cpu")
         train_loss = np.zeros(len(data_loader))
         train_z= np.zeros(len(data_loader))
         train_z_mu =  np.zeros(len(data_loader))
         x_clamp=10
+        start_model = True
         print("Start Training")
         for i in range(FLAGS.Epochs):
+            num_data = 0
             for step, the_data in enumerate(data_loader):
-                if step == 0:
-                    binom_coef = np.load(FLAGS.path_to_binomial)
-                    #create a predefined binomial sample
+                if start_model:
                     # initalize model
                     #(self, latent_dims, pop_size, mut_rate, dim_hidden, use_set, use_cuda):
                     model = sfsVAE(FLAGS.Latent_Dim, pop_size=the_data['Labels']['pop_size'][0].item(), 
-                                    mut_rate=the_data['Labels']['mut_rate'][0], dim_hidden=FLAGS.Hidden_Dim, use_set=False, use_cuda=FLAGS.cuda, coef = binom_coef).to(device)
+                                    mut_rate=the_data['Labels']['mut_rate'][0], dim_hidden=FLAGS.Hidden_Dim, use_set=False, use_cuda=FLAGS.cuda).to(device)
                     true_sel_coef = the_data['Labels']['sel_coef'][0]
                     optimizer = optim.Adamax(model.parameters(), lr=0.0005,  eps=1.e-7)
                     if FLAGS.cuda:
-                        #data = torch.mul(the_data['Freq'][:,:,1].cuda(), (1/2*the_data['Labels']['pop_size'][0]))
                         data = the_data['Freq'][:,:,1].cuda()
-                        beta_data = the_data['Effect'][:].cuda()
+                        #beta_data = the_data['Effect'][:].cuda()
                     else:
-                        #data = torch.mul(the_data['Freq'][:,:,1], (1/2*the_data['Labels']['pop_size'][0]))
                         data = the_data['Freq'][:,:,1]
-                        beta_data = the_data['Effect'][:].cuda()
+                        #beta_data = the_data['Effect'][:]
                     
                     x_mean, z_mu, z_var, ldj, z0, zk = model(data)
-
-                    #loss, rec, kl, bpd = model.calculate_loss(x_mean, data, z_mu, z_var, z0, zk, ldj)
                     loss, rec, kl = model.calculate_loss(x_mean, data, z_mu, z_var, z0, zk, ldj)
                     loss.backward()
                     train_loss[step] = loss.item()
                     train_z[step] = torch.mean(zk).detach().cpu().numpy()
                     train_z_mu[step] = torch.mean(z_mu).detach().cpu().numpy()
                     optimizer.step()
-                    num_data += 2 # hard-coded temporarily
+                    num_data += FLAGS.Batch_Size 
+                    start_model = False
                 else:
                     optimizer.zero_grad()
                     if FLAGS.cuda:
@@ -698,7 +482,7 @@ def main(argv):
                     train_loss[step] = loss.item()
                     train_z[step] = torch.mean(zk).detach().cpu().numpy()
                     train_z_mu[step] = torch.mean(z_mu).detach().cpu().numpy()
-                    num_data += 2 # hard-coded temporarily
+                    num_data += FLAGS.Batch_Size # hard-coded temporarily
                 
                 if step % 10 == 0:
                 
@@ -712,8 +496,8 @@ def main(argv):
             plt.xlabel('Training Step')
             plt.title('Inferred Selection from s_mu Simulated GWAS with x clamped at {}'.format(x_clamp))
             plt.legend(loc='upper right')
-            plt.savefig('Slim_experiment_6_1_75_epoch_{}'.format(i))
-
+            plt.savefig('Slim_experiment_9_1_75_epoch_{}'.format(i))
+            
                     
     else:
         print("Need a path to a dataset or to create one.")
@@ -725,7 +509,7 @@ def main(argv):
     legend_labels = ['Epoch {}'.format(j) for j in range(1,11)]
     plt.legend(legend_labels, loc='upper right')
     plt.plot(np.log(np.abs(train_z)))
-    plt.savefig('Slim_4_all_experiment_6_1_75_epoch'.format(i))
+    plt.savefig('Slim_9_all_experiment_6_1_75_epoch'.format(i))
     plt.close() 
     
     plt.axhline(y=np.log(np.abs(true_sel_coef.numpy()*the_data['Labels']['pop_size'][0].numpy()*2)), color='r', linestyle='-')
@@ -735,7 +519,7 @@ def main(argv):
     legend_labels = ['Epoch {}'.format(j) for j in range(1,11)]
     plt.legend(legend_labels, loc='upper right')
     plt.plot(np.log(np.abs(train_z_mu)))
-    plt.savefig('Slim_4_all_experiment_6_1_75_epoch'.format(i))
+    plt.savefig('Slim_9_all_experiment_6_1_75_epoch'.format(i))
     
     
 
