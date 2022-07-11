@@ -1,8 +1,11 @@
 // script for Additive Selection
-// fitness effects of mutations in SLIM:
+// ﬁtness behave additively, such that each copy of allele a changes ﬁtness by s (giving ﬁtnesses of 1, 1 + s, and 1 + 2s)
+// fitness effects of mutations in SLIM are multiplicative, but for selection coefficients less than 0.4, (1+s)^2 ~ (1+2s)
 // no mutation = 1
-// heterogyzgote = 1 + h*s
-// homozygote = 1 + s 
+// heterogyzgote = 1 + h*s 
+// homozygote = (1 + s)^2
+// however for s > .04 we can use the fitness callback but this becomes much slower by x4 seconds (120 seconds without, 600 seconds with)
+
 
 
 initialize() {
@@ -10,23 +13,31 @@ initialize() {
 	defineConstant("N", 500); // population size        
 	defineConstant("outfile", "test"); // output filename
 	
-	defineConstant("L", 5e8);      // total chromosome length
-	defineConstant("mu", 1e-7); // mutation rate
-	defineConstant("dominance_coef", 1.9e5); // dominance coefficient so that heterozygote is selected against
-	// defineConstant("stable_selection", -1*((1/(4*N))*1e-2));  // selection coefficient for under-dominance
+	defineConstant("L", 1e6);      // total chromosome length
+	defineConstant("mu", 1e-5); // mutation rate
+	defineConstant("dominance_coef", 0.5); // dominance coefficient -- additive selection no dominance
 	defineConstant("recomb_rate", 1e-8);  // recombination rate
-    defineConstant("selection", 0.02);
+   	defineConstant("selection", 0.02);
 	
 	initializeMutationRate(mu);
 	initializeRecombinationRate(1e-7);
 	
-	initializeMutationType("m1", 0.5, "f", 0.0);  // neutral, s = 0
-	initializeMutationType("m2", 0.5, "f", selection);  // single selection coefficient
+	initializeMutationType("m1", dominance_coef, "f", 0.0);  // neutral, s = 0
+	initializeMutationType("m2", dominance_coef, "f", selection);  // single selection coefficient
 	m2.color="red";
 	initializeGenomicElementType("g1", c(m1,m2), c(0.3,0.7)); // 1.0:
-	//initializeGenomicElementType("g1", m2, 1.0); 
 	initializeGenomicElement(g1, 0, L);
 }
+
+// Fitness callback when selection coefficient is greater than 0.4
+// fitness(m2) 
+// {
+// 	if (homozygous)
+// 		return 1.0 + 2*mut.selectionCoeff;
+// 	else
+// 		return 1.0 + mut.selectionCoeff;
+// }
+
 
 /// **Demography:**
 
@@ -34,29 +45,20 @@ initialize() {
 1 {
 	sim.addSubpop("p1", N);
 }
+2000 { p1.setSubpopulationSize(500); }
 4000 { p1.setSubpopulationSize(500); }
 5500 { p1.setSubpopulationSize(500); }
 
-/* 1 late() {
-	
-	// create a log file 
-  log = sim.createLogFile("/mnt/sda/home/ludeep/Desktop/PopGen/EvolutionaryGWAS/Slim_simulations/StabalizingSelectionSlim/sim_log.txt", sep="\t", logInterval=10); 
-  log.addGeneration(); 
-  log.addPopulationSize(); 
-  //log.addCustomColumn("Mean_Fitness", "mean(p1.cachedFitness(NULL));");
-  log.addCustomColumn("SFS_0 ", "mutTypeFrequency2(p1,m2);"); 
-  log.addCustomColumn("SFS_1 ", "mutTypeFrequency(p1,m2);");  
 
-} */
 
 6000 late() {
 	
 	m2muts = sim.mutationsOfType(m2);
 	freqs = sim.mutationFrequencies(p1, m2muts);
 	
-	lines = m2muts.id + "\t" + m2muts.position + "\t" + m2muts.selectionCoeff + "\t" + freqs + "\n";
+	lines = m2muts.id + "\t" + m2muts.position + "\t" + m2muts.selectionCoeff + "\t" + freqs + "\t" + N + "\t" + L + "\t" + dominance_coef + "\t" + mu + "\t" + recomb_rate + "\n";
 	file = paste(lines, sep="");
-	file = "tag" + "\t" + "position" + "\t" + "selection coefficient" + "\t" + "freq\n" + file;
+	file = "tag" + "\t" + "position" + "\t" + "sel_coef" + "\t" + "freq" + "\t" + "pop_size" + "\t" + "chromo_length" + "\t" + "dom_coef" + "\t" + "mut_rate" + "\t" + "recomb_rate\n"  + file;
 	if (!writeFile(paste(c(outfile,".mixture"),sep=""), file)) stop("Error writing file.");
 	sim.simulationFinished();
 }
